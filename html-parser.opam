@@ -1,0 +1,27 @@
+opam-version: "2.0"
+synopsis: "Simple HTML parser"
+maintainer: ["maxime.levillain@functori.com"]
+authors: ["Maxime Levillain <maxime.levillain@functori.com>"]
+license: "MIT"
+homepage: "https://github.com/maxtori/html-parser"
+bug-reports: "https://github.com/maxtori/html-parser/issues"
+depends: [
+  "dune" {>= "3.10"}
+  "ppxlib"
+  "odoc" {with-doc}
+]
+build: [
+  ["dune" "subst"] {dev}
+  [
+    "dune"
+    "build"
+    "-p"
+    name
+    "-j"
+    jobs
+    "@install"
+    "@runtest" {with-test}
+    "@doc" {with-doc}
+  ]
+]
+dev-repo: "git://github.com/maxtori/html-parser"

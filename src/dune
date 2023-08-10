@@ -1,0 +1,5 @@
+(library
+ (name html)
+ (public_name html-parser)
+ (modules html)
+ (preprocess (pps ppx_deriving.show)))
