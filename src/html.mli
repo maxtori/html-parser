@@ -1,7 +1,7 @@
 type tag = { name : string; attributes : (string * string option) list; } [@@deriving show]
 type element = [ `node of node | `text of string ] [@@deriving show]
 and node = { tag : tag; children : element list; } [@@deriving show]
-val parse : string -> node
+val parse : ?allow_unquoted:bool -> ?allow_unclosed:bool -> string -> node
 
 type selector = [
   | `attr of string * string option

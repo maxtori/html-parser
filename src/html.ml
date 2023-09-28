@@ -36,6 +36,13 @@ let rec next_char l s i =
     else next_char l s (i+1)
   with _ -> None
 
+let rec next_str tpl n s i =
+  try
+    let x = String.sub s i n in
+    if x = tpl then Some i
+    else next_str tpl n s (i+1)
+  with _ -> None
+
 let get_text ({o; s; _} as b) : token b =
   match String.index_from_opt s o '<' with
   | None -> failwith "failed to parse text"
@@ -46,31 +53,39 @@ let get_close ({o; s; _} as b) : token b =
   | None -> failwith "failed to parse closing tag"
   | Some j -> { b with o=j+1; r=`close (String.sub s (o+2) (j-o-2)) }
 
-let get_attribute ({o; s; _ } as b) =
+let get_attribute ?(allow_unquoted=false) ({o; s; _ } as b) =
   match next_char ('=' :: '>' :: empty_chars) s o with
   | None -> failwith "failed to parse attribute"
   | Some (j, '>') -> {b with o=j; r = (String.sub s o (j-o-1), None)}
   | Some (j, '=') ->
     let quote = String.get s (j+1) in
-    begin match String.index_from_opt s (j+2) quote with
-      | None -> failwith "failed to parse attribute value"
-      | Some k ->
-        {b with o=k+1; r = (String.sub s o (j-o), Some (String.sub s (j+2) (k-j-2)))}
-    end
+    if quote = '"' || quote = '\'' then
+      begin match String.index_from_opt s (j+2) quote with
+        | None -> failwith "failed to parse attribute value"
+        | Some k ->
+          {b with o=k+1; r = (String.sub s o (j-o), Some (String.sub s (j+2) (k-j-2)))}
+      end
+    else if allow_unquoted then
+      begin match next_char ('>' :: empty_chars) s o with
+        | None -> failwith "failed to parse attribute value"
+        | Some (k, _) ->
+          {b with o=k; r = (String.sub s o (j-o), Some (String.sub s (j+1) (k-j-1)))}
+      end
+    else failwith "unquoted attribute value"
   | Some (j, _) ->
     {b with o=j; r=(String.sub s o (j-o), None)}
 
-let rec get_attributes ({o; s; r} as b) =
+let rec get_attributes ?allow_unquoted ({o; s; r} as b) =
   if o = String.length s then b
   else
     let c = String.get s o in
-    if List.mem c empty_chars then get_attributes {o=o+1; s; r}
+    if List.mem c empty_chars then get_attributes ?allow_unquoted {o=o+1; s; r}
     else if c = '>' then {b with o=o+1}
     else
-      let a = get_attribute {o; s; r=()} in
-      get_attributes {b with o=a.o; r = r @ [ a.r ]}
+      let a = get_attribute ?allow_unquoted {o; s; r=()} in
+      get_attributes ?allow_unquoted {b with o=a.o; r = r @ [ a.r ]}
 
-let get_tag {o; s; _} : token b =
+let get_tag ?allow_unquoted {o; s; _} : token b =
   match next_char ('>' :: empty_chars) s o with
   | None -> failwith "failed to parse tag"
   | Some (j, '>') ->
@@ -78,29 +93,31 @@ let get_tag {o; s; _} : token b =
     { o=j+1; s; r=`tag {name; attributes=[]} }
   | Some (j, _) ->
     let name = String.sub s (o+1) (j-o-1) in
-    let a = get_attributes {o=j; s; r=[]} in
+    let a = get_attributes ?allow_unquoted {o=j; s; r=[]} in
     { o=a.o; s; r=`tag {name; attributes=a.r} }
 
 let get_comment {o; s; _} : token b =
-  match String.index_from_opt s o '>' with
+  match next_str "-->" 3 s o with
   | None -> failwith "failed to parse comment"
   | Some j ->
-    let c = String.sub s (o+2) (j-o-2) in
-    match String.split_on_char ' ' c with
-    | "doctype" :: _ | "DOCTYPE" :: _ -> {s; o=j+1; r=`doctype}
-    | _ ->
-      let c = String.trim @@ String.sub c 2 (String.length c - 4) in
-      {s; o=j+1; r=`comment c}
+    let c = String.trim @@ String.sub s (o+4) (j-o-4) in
+    {s; o=j+3; r=`comment c}
 
-let get_token b : token b =
+let get_token ?allow_unquoted b : token b =
   if String.get b.s b.o <> '<' then get_text b
   else
     let c = String.get b.s (b.o+1) in
     if c = '/' then get_close b
-    else if c = '!' then get_comment b
-    else get_tag b
+    else if c = '!' then
+      try
+        let s_doc = String.sub b.s (b.o+2) 7 in
+        if s_doc = "doctype" || s_doc = "DOCTYPE" then
+          {b with o=String.index_from b.s (b.o+2) '>'+1; r=`doctype}
+        else get_comment b
+      with _ -> get_comment b
+    else get_tag ?allow_unquoted b
 
-let rec get_tokens b =
+let rec get_tokens ?allow_unquoted b =
   if String.length b.s = b.o then
     List.fold_left (fun acc t -> match t with
         | `text s ->
@@ -108,15 +125,15 @@ let rec get_tokens b =
           if s = "" then acc else `text s :: acc
         | t -> t :: acc) [] b.r
   else
-    let el = get_token b in
-    get_tokens { el with r = el.r :: b.r }
+    let el = get_token ?allow_unquoted b in
+    get_tokens ?allow_unquoted { el with r = el.r :: b.r }
 
 let self_closing = [
   "area"; "base"; "br"; "col"; "embed"; "hr"; "img"; "input"; "link"; "meta";
   "param"; "source"; "track"; "vbr"
 ]
 
-let elements_of_tokens (l: token list) =
+let elements_of_tokens ?(allow_unclosed=false) (l: token list) =
   let rec aux tag children = function
     | `tag t :: q ->
       let child, q =
@@ -127,6 +144,12 @@ let elements_of_tokens (l: token list) =
     | (`comment _ | `doctype) :: q -> aux tag children q
     | `close name :: q when name = tag.name ->
       `node { tag; children=List.rev children }, q
+    | (`close _ :: _) as l ->
+      if allow_unclosed then
+        `node { tag; children=List.rev children }, l
+      else (
+        Format.fprintf Format.str_formatter "unclosed tag: %a" pp_tag tag;
+        failwith (Format.flush_str_formatter ()))
     | _l -> failwith "wrong html structure 0" in
   match l with
   | `doctype :: `tag t :: q
@@ -137,9 +160,9 @@ let elements_of_tokens (l: token list) =
     end
   | _ -> failwith "wrong html structure 2"
 
-let parse s =
-  let tokens = get_tokens { s=String.trim s; o=0; r=[] } in
-  elements_of_tokens tokens
+let parse ?allow_unquoted ?allow_unclosed s =
+  let tokens = get_tokens ?allow_unquoted { s=String.trim s; o=0; r=[] } in
+  elements_of_tokens ?allow_unclosed tokens
 
 type selector = [
   | `id of string
