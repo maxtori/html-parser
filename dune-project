@@ -1,4 +1,4 @@
-(lang dune 3.10)
+(lang dune 3.12)
 
 (name html-parser)
 (source (uri git://github.com/maxtori/html-parser))
@@ -11,5 +11,5 @@
 (package
  (name html-parser)
  (synopsis "Simple HTML parser")
- (depends ppxlib)
+ (depends ppx_deriving)
 )

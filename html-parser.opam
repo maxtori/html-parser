@@ -6,8 +6,8 @@ license: "MIT"
 homepage: "https://github.com/maxtori/html-parser"
 bug-reports: "https://github.com/maxtori/html-parser/issues"
 depends: [
-  "dune" {>= "3.10"}
-  "ppxlib"
+  "dune" {>= "3.12"}
+  "ppx_deriving"
   "odoc" {with-doc}
 ]
 build: [
